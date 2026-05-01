@@ -74,17 +74,26 @@ def load_compiler_namespace() -> dict[str, object]:
 
 def compile_test_program() -> Path | None:
     if os.name == "nt":
-        compiler = shutil.which("icx")
-        if compiler is None:
-            return None
         out = DIR / "test_eml_binary.exe"
-        subprocess.run(
-            [compiler, "/nologo", "/Qstd:c11", "/TC", "test_eml_binary.c", f"/Fe:{out.name}"],
-            cwd=DIR,
-            check=True,
-            text=True,
-        )
-        return out
+        compiler = shutil.which("icx")
+        if compiler is not None:
+            subprocess.run(
+                [compiler, "/nologo", "/Qstd:c11", "/TC", "test_eml_binary.c", f"/Fe:{out.name}"],
+                cwd=DIR,
+                check=True,
+                text=True,
+            )
+            return out
+        for name in ("clang", "gcc", "cc"):
+            compiler = shutil.which(name)
+            if compiler is not None:
+                cmd = [compiler, "-std=c11", "-O0", "test_eml_binary.c", "-o", out.name]
+                try:
+                    subprocess.run(cmd, cwd=DIR, check=True, text=True)
+                except subprocess.CalledProcessError:
+                    subprocess.run(cmd + ["-lm"], cwd=DIR, check=True, text=True)
+                return out
+        return None
 
     compiler = shutil.which("cc")
     if compiler is None:
