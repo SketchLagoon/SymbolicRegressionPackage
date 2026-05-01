@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+.Python
+.pytest_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Rust build artifacts
+rust_*/target/
+# Note: Cargo.lock files are tracked for binary reproducibility.
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~
+
+# Training run output (regeneratable)
+EML_toolkit/EmL_training/PyTorch_v16_final/smoke_d2/
