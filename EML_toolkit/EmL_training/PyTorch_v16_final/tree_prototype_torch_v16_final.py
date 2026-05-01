@@ -329,7 +329,7 @@ class EMLTree(nn.Module):
 
         leaf_probs = torch.softmax(self.leaf_logits / tau_leaf, dim=1)
         weights = leaf_probs.to(DTYPE)
-        ones = torch.ones(batch_size, dtype=DTYPE)
+        ones = torch.ones(batch_size, dtype=DTYPE, device=x.device)
         candidates = torch.stack([ones, x, y], dim=1)
         current_level = torch.matmul(candidates, weights.T)
 
@@ -554,7 +554,7 @@ def compute_losses(
     binarity = (gate_bin * gate_unc).mean()
 
     sparse = torch.mean(1.0 - gate_probs)
-    inter_penalty = torch.tensor(0.0, dtype=REAL_DTYPE)
+    inter_penalty = torch.tensor(0.0, dtype=REAL_DTYPE, device=pred.device)
     if lam_inter > 0 and eml_outputs:
         for lo in eml_outputs:
             excess = torch.relu(lo.abs() - inter_threshold)
@@ -721,6 +721,7 @@ def train_one_seed(seed, strategy, args, x_train, y_train, t_train, manual_init_
         if args.init_noise > 0:
             add_init_noise(tree, args.init_noise, seed=seed)
 
+    tree = tree.to(args.device)
     optimizer = torch.optim.Adam(tree.parameters(), lr=args.lr)
 
     hist = {
@@ -1060,6 +1061,9 @@ def parse_args():
     a("--lbfgs-steps", type=int, default=0)
     a("--lbfgs-lr", type=float, default=0.6)
 
+    # Device
+    a("--device", type=str, default="auto", help="cpu, cuda, cuda:0, or auto (cuda if available else cpu)")
+
     # Output
     a("--save-prefix", type=str, default="v16_run")
     a("--export-m", type=str, default="eml_tree_v16_final.m")
@@ -1079,6 +1083,11 @@ def parse_args():
         raise ValueError("--depth must be >= 0")
     if args.init_strategy not in INIT_STRATEGIES_ALL + ["manual", "all"]:
         raise ValueError(f"Unsupported --init-strategy: {args.init_strategy}")
+
+    if args.device == "auto":
+        args.device = "cuda" if torch.cuda.is_available() else "cpu"
+    if args.device.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError(f"--device {args.device} requested but CUDA is not available")
 
     return args
 
@@ -1110,6 +1119,12 @@ def main():
 
         x_train, y_train, t_train = make_grid_data(target_fn, lo=args.data_lo, hi=args.data_hi, step=args.data_step)
         x_gen, y_gen, t_gen = make_generalization_data(target_fn, lo=args.gen_lo, hi=args.gen_hi, n=args.generalization_points)
+        x_train = x_train.to(args.device)
+        y_train = y_train.to(args.device)
+        t_train = t_train.to(args.device)
+        x_gen = x_gen.to(args.device)
+        y_gen = y_gen.to(args.device)
+        t_gen = t_gen.to(args.device)
         manual_init_fn = make_manual_init_fn(args)
         if manual_init_fn is not None:
             strategies = ["manual"]
@@ -1127,6 +1142,10 @@ def main():
         run_plan = [(s, st) for s in seeds for st in strategies]
 
         print("\n=== EML Tree Training v16_final ===")
+        device_label = args.device
+        if args.device.startswith("cuda"):
+            device_label = f"{args.device} ({torch.cuda.get_device_name(0)})"
+        print(f"device: {device_label}")
         print(f"target: {args.target_fn} = {target_desc}")
         print(f"depth={args.depth} leaves={2**args.depth} internal={2**args.depth - 1}")
         print(f"runs={len(run_plan)} seeds={len(seeds)} strategies={strategies}")
@@ -1203,7 +1222,7 @@ def main():
         print(f"Best seed={best['seed']} strategy={best['strategy']} snapped_rmse={math.sqrt(max(best['score'], 0.0)):.3e}")
 
         if best["state"] is not None:
-            best_tree = EMLTree(depth=args.depth, eml_clamp=args.eml_clamp)
+            best_tree = EMLTree(depth=args.depth, eml_clamp=args.eml_clamp).to(args.device)
             best_tree.load_state_dict(best["state"])
             export_path = output_dir / args.export_m
             best_tree.export_mathematica(str(export_path), discretize=True, snap_threshold=args.snap_threshold)
